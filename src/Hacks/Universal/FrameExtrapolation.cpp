@@ -10,7 +10,7 @@ public:
         setName("Frame Extrapolation");
         setID("frame-extrapolation");
         setCategory("Universal");
-        setDescription("Smooths between frames by predicting player/camera position. Patched for lag and ground jitter.");
+        setDescription("Smooths between frames by predicting positions. Patched for GD 2.2.");
         setDisabled(false);
         setDisabledMessage("Frame extrapolation is temporarily disabled due to bugs");
     }
@@ -25,9 +25,12 @@ class $modify(ExtrapolatedGameLayer, GJBaseGameLayer) {
         CCPoint m_lastCamPos = {0, 0};
         CCPoint m_lastCamPos2 = {0, 0};
         float m_lastModifiedDelta = 0.0f;
+        
+        // Storage for rotation since m_lastRotation can be unreliable in 2.2
+        float m_p1LastRot = 0.0f;
+        float m_p2LastRot = 0.0f;
     };
 
-    // Manual lerp and clamp to fix "Exit Code 1" compiler errors (prevents C++20 requirement)
     float lerpVal(float a, float b, float t) {
         if (t > 1.0f) t = 1.0f;
         if (t < 0.0f) t = 0.0f;
@@ -62,10 +65,9 @@ class $modify(ExtrapolatedGameLayer, GJBaseGameLayer) {
 
         if (f->m_timeTilNextTick <= 0) return;
 
-        // Calculate progress percentage
         float percent = f->m_progressTilNextTick / f->m_timeTilNextTick;
 
-        // 1. OBJECT LAYER (CAMERA) - Fixes ground jitter desync
+        // Camera / Object Layer Extrapolation
         float camDiffX = f->m_lastCamPos.x - f->m_lastCamPos2.x;
         float camDiffY = f->m_lastCamPos.y - f->m_lastCamPos2.y;
         float endCamX = f->m_lastCamPos.x + camDiffX;
@@ -74,23 +76,25 @@ class $modify(ExtrapolatedGameLayer, GJBaseGameLayer) {
         m_objectLayer->setPositionX(lerpVal(f->m_lastCamPos.x, endCamX, percent));
         m_objectLayer->setPositionY(lerpVal(f->m_lastCamPos.y, endCamY, percent));
 
-        // 2. GROUND LAYERS - Patched to sync with extrapolated camera
+        // Ground Sync
         if (m_groundLayer) extrapolateGround(m_groundLayer, percent, camDiffX);
         if (m_groundLayer2) extrapolateGround(m_groundLayer2, percent, camDiffX);
 
-        // 3. PLAYERS - Fixed the "teleport" bug during portals/resets
-        extrapolatePlayer(m_player1, percent);
-        if (m_player2) extrapolatePlayer(m_player2, percent);
+        // Player Extrapolation
+        extrapolatePlayer(m_player1, percent, f->m_p1LastRot);
+        if (m_player2) extrapolatePlayer(m_player2, percent, f->m_p2LastRot);
+
+        // Update stored rotation for the next tick
+        if (m_player1) f->m_p1LastRot = m_player1->getRotation();
+        if (m_player2) f->m_p2LastRot = m_player2->getRotation();
     }
 
-    void extrapolatePlayer(PlayerObject* player, float percent) {
+    void extrapolatePlayer(PlayerObject* player, float percent, float lastRot) {
         if (!player || player->m_isDead) return;
 
-        // Velocity-based prediction
         float diffX = player->m_position.x - player->m_lastPosition.x;
         float diffY = player->m_position.y - player->m_lastPosition.y;
         
-        // Prevent huge snaps (like portal teleports) from being extrapolated
         if (std::abs(diffX) > 100.0f) return;
 
         float endX = player->m_position.x + diffX;
@@ -101,15 +105,15 @@ class $modify(ExtrapolatedGameLayer, GJBaseGameLayer) {
             lerpVal(player->m_position.y, endY, percent) 
         });
 
-        // Rotation prediction logic
+        // Rotation Fix using CCNode methods
         if (player->m_mainLayer) {
-            float rotDiff = player->m_rotation - player->m_lastRotation;
-            player->m_mainLayer->setRotation(player->m_rotation + (rotDiff * percent));
+            float currentRot = player->getRotation();
+            float rotDiff = currentRot - lastRot;
+            player->m_mainLayer->setRotation(currentRot + (rotDiff * percent));
         }
     }
 
     void extrapolateGround(GJGroundLayer* ground, float percent, float moveDelta) {
-        // Corrects the "jittery floor" bug by offsetting children based on camera movement
         for (auto child : CCArrayExt<CCNode*>(ground->getChildren())) {
             if (typeinfo_cast<CCSpriteBatchNode*>(child)) {
                 child->setPositionX(lerpVal(0.0f, moveDelta, percent));
