@@ -13,7 +13,7 @@ class FrameExtrapolation : public Module
             setID("frame-extrapolation");
             setCategory("Universal");
             setDescription("Smooths between frames by predicting where the player will be the next frame using its velocity.");
-            setDisabled(true);
+            setDisabled(false);
             setDisabledMessage("Frame extrapolation is temporarily disabled due to bugs");
         }
 };
