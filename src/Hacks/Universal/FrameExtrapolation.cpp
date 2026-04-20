@@ -10,7 +10,7 @@ public:
         setName("Frame Extrapolation");
         setID("frame-extrapolation");
         setCategory("Universal");
-        setDescription("Smooths movement between physics ticks. Works with TPS Bypass.");
+        setDescription("Smooths movement. Patched for Low TPS flickering and Rotation bugs.");
         setDisabled(false);
         setDisabledMessage("Frame extrapolation is temporarily disabled due to bugs");
     }
@@ -31,7 +31,6 @@ class $modify(ExtrapolatedGameLayer, GJBaseGameLayer) {
         float m_p2LastRot = 0.0f;
     };
 
-    // Manual lerp for standard compatibility
     float lerpVal(float a, float b, float t) {
         if (t > 1.0f) t = 1.0f;
         if (t < 0.0f) t = 0.0f;
@@ -39,7 +38,6 @@ class $modify(ExtrapolatedGameLayer, GJBaseGameLayer) {
     }
 
     virtual void update(float dt) {
-        // Run original physics first
         GJBaseGameLayer::update(dt);
 
         auto pl = typeinfo_cast<PlayLayer*>(this);
@@ -50,43 +48,40 @@ class $modify(ExtrapolatedGameLayer, GJBaseGameLayer) {
 
         auto f = m_fields.self();
 
-        // TPS BYPASS DETECTION:
-        // We look at the actual camera object. If it moved, a physics tick occurred.
         CCPoint currentCam = m_objectLayer->getPosition();
         
         if (currentCam != f->m_lastCamPos) {
-            // New Physics Tick detected
             f->m_timeTilNextTick = dt; 
             f->m_progressTilNextTick = 0;
             f->m_lastCamPos2 = f->m_lastCamPos;
             f->m_lastCamPos = currentCam;
         } else {
-            // We are between ticks (extrapolating)
             f->m_progressTilNextTick += dt;
         }
 
-        if (f->m_timeTilNextTick <= 0) return;
+        // STABILITY PATCH: If TPS is lower than 30 (dt > 0.033), 
+        // extrapolation is too inaccurate. Disable to prevent level disappearing.
+        if (f->m_timeTilNextTick <= 0 || f->m_timeTilNextTick > 0.034f) return;
 
-        // Calculate progress percentage
         float percent = f->m_progressTilNextTick / f->m_timeTilNextTick;
         if (percent > 1.0f) percent = 1.0f;
 
-        // 1. Camera Extrapolation
+        // Camera Extrapolation
         float camDiffX = f->m_lastCamPos.x - f->m_lastCamPos2.x;
         float camDiffY = f->m_lastCamPos.y - f->m_lastCamPos2.y;
         
-        m_objectLayer->setPositionX(lerpVal(f->m_lastCamPos.x, f->m_lastCamPos.x + camDiffX, percent));
-        m_objectLayer->setPositionY(lerpVal(f->m_lastCamPos.y, f->m_lastCamPos.y + camDiffY, percent));
+        // Safety: If camera jump is massive, don't extrapolate (prevents disappearing level)
+        if (std::abs(camDiffX) < 150.0f) {
+            m_objectLayer->setPositionX(lerpVal(f->m_lastCamPos.x, f->m_lastCamPos.x + camDiffX, percent));
+            m_objectLayer->setPositionY(lerpVal(f->m_lastCamPos.y, f->m_lastCamPos.y + camDiffY, percent));
+        }
 
-        // 2. Ground Extrapolation
         if (m_groundLayer) extrapolateGround(m_groundLayer, percent, camDiffX);
         if (m_groundLayer2) extrapolateGround(m_groundLayer2, percent, camDiffX);
 
-        // 3. Player Extrapolation
         if (m_player1) extrapolatePlayer(m_player1, percent, f->m_p1LastPos, f->m_p1LastRot);
         if (m_player2) extrapolatePlayer(m_player2, percent, f->m_p2LastPos, f->m_p2LastRot);
 
-        // Update stored states for the next frame's detection
         if (m_player1) {
             f->m_p1LastPos = m_player1->getPosition();
             f->m_p1LastRot = m_player1->getRotation();
@@ -104,18 +99,24 @@ class $modify(ExtrapolatedGameLayer, GJBaseGameLayer) {
         float diffX = currentPos.x - lastPos.x;
         float diffY = currentPos.y - lastPos.y;
         
-        // Prevent huge snaps from portal/reset teleports
-        if (std::abs(diffX) > 100.0f) return;
+        // Safety: Prevent teleporting icons
+        if (std::abs(diffX) > 100.0f || std::abs(diffX) < 0.001f) return;
 
         player->CCNode::setPosition({ 
             lerpVal(currentPos.x, currentPos.x + diffX, percent), 
             lerpVal(currentPos.y, currentPos.y + diffY, percent) 
         });
 
-        // Rotation prediction
+        // HELICOPTER FIX: Handle rotation wrapping (360 -> 0)
         float currentRot = player->getRotation();
         float rotDiff = currentRot - lastRot;
-        
+
+        if (std::abs(rotDiff) > 180.0f) {
+            // If the rotation jumped more than 180 degrees, it's a wrap-around.
+            // Don't extrapolate rotation this frame to prevent the 360-spin glitch.
+            rotDiff = 0;
+        }
+
         if (auto visual = player->getChildByID("main-layer")) {
             visual->setRotation(currentRot + (rotDiff * percent));
         } else {
@@ -124,7 +125,7 @@ class $modify(ExtrapolatedGameLayer, GJBaseGameLayer) {
     }
 
     void extrapolateGround(GJGroundLayer* ground, float percent, float moveDelta) {
-        if (!ground || !ground->getChildren()) return;
+        if (!ground || !ground->getChildren() || std::abs(moveDelta) > 150.0f) return;
         auto children = ground->getChildren();
         for (int i = 0; i < children->count(); ++i) {
             auto child = static_cast<CCNode*>(children->objectAtIndex(i));
