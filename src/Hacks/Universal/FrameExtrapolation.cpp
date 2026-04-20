@@ -1,4 +1,3 @@
-
 #include "../../Client/Module.hpp"
 #include <Geode/modify/GJBaseGameLayer.hpp>
 #include <Geode/modify/PlayLayer.hpp>
@@ -48,10 +47,14 @@ class $modify(ExtrapolatedGameLayer, GJBaseGameLayer) {
     virtual void update(float dt) {
         GJBaseGameLayer::update(dt);
 
-        if (!typeinfo_cast<PlayLayer*>(this)) return;
+        auto pl = typeinfo_cast<PlayLayer*>(this);
+        if (!pl) return;
+        
         auto mod = FrameExtrapolation::get();
         if (!mod || !mod->getRealEnabled()) return;
-        if (m_isPaused || dt <= 0) return;
+
+        // FIX: Use the casted PlayLayer to check for m_isPaused
+        if (pl->m_isPaused || dt <= 0) return;
 
         auto f = m_fields.self();
 
@@ -67,18 +70,18 @@ class $modify(ExtrapolatedGameLayer, GJBaseGameLayer) {
         if (f->m_timeTilNextTick <= 0) return;
         float percent = f->m_progressTilNextTick / f->m_timeTilNextTick;
 
-        // 1. Camera
+        // Camera
         float camDiffX = f->m_lastCamPos.x - f->m_lastCamPos2.x;
         float camDiffY = f->m_lastCamPos.y - f->m_lastCamPos2.y;
         
         m_objectLayer->setPositionX(lerpVal(f->m_lastCamPos.x, f->m_lastCamPos.x + camDiffX, percent));
         m_objectLayer->setPositionY(lerpVal(f->m_lastCamPos.y, f->m_lastCamPos.y + camDiffY, percent));
 
-        // 2. Ground
+        // Ground
         if (m_groundLayer) extrapolateGround(m_groundLayer, percent, camDiffX);
         if (m_groundLayer2) extrapolateGround(m_groundLayer2, percent, camDiffX);
 
-        // 3. Players
+        // Players
         if (m_player1) extrapolatePlayer(m_player1, percent, f->m_p1LastPos, f->m_p1LastRot);
         if (m_player2) extrapolatePlayer(m_player2, percent, f->m_p2LastPos, f->m_p2LastRot);
 
@@ -107,11 +110,9 @@ class $modify(ExtrapolatedGameLayer, GJBaseGameLayer) {
             lerpVal(currentPos.y, currentPos.y + diffY, percent) 
         });
 
-        // Fixed Rotation logic
         float currentRot = player->getRotation();
         float rotDiff = currentRot - lastRot;
         
-        // Use the main visual node for rotation smoothing
         if (auto visual = player->getChildByID("main-layer")) {
             visual->setRotation(currentRot + (rotDiff * percent));
         } else {
