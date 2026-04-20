@@ -6,13 +6,13 @@ using namespace geode::prelude;
 class GhostIcon : public Module {
 public:
     MODULE_SETUP(GhostIcon) {
-        setName("Ghost Icon");
-        setID("ghost-icon");
+        setID("ghost-icon"); // This is the internal ID
+        setName("Ghost Icon"); // This is the display name
         setCategory("Universal");
         setDescription("Plays back your previous attempt as a transparent ghost.");
+        
         setDisabled(false);
-        // Added the message in case you need to lock it later
-        setDisabledMessage("Ghost Icon is currently disabled.");
+        setDisabledMessage("Ghost Icon is temporarily disabled for maintenance.");
     }
 };
 
@@ -29,15 +29,18 @@ class $modify(GhostLayer, PlayLayer) {
     bool init(GJGameLevel* level, bool useReplay, bool dontSave) {
         if (!PlayLayer::init(level, useReplay, dontSave)) return false;
         
-        if (GhostIcon::get()->getRealEnabled()) {
-            // Android Tip: Using a simple circle or dot is better for performance than a full icon
-            m_fields->m_ghostSprite = CCSprite::createWithSpriteFrameName("player_ball_001.png"); 
+        auto mod = GhostIcon::get();
+        if (mod && mod->getRealEnabled()) {
+            // Using the official ghost sprite frame
+            m_fields->m_ghostSprite = CCSprite::createWithSpriteFrameName("gj_ghostIcon_001.png");
+            
             if (m_fields->m_ghostSprite) {
-                m_fields->m_ghostSprite->setOpacity(100);
-                m_fields->m_ghostSprite->setScale(0.8f);
+                m_fields->m_ghostSprite->setOpacity(130);
+                m_fields->m_ghostSprite->setZOrder(10);
                 m_fields->m_ghostSprite->setVisible(false);
-                // We add it to the object layer so it moves with the camera
-                m_objectLayer->addChild(m_fields->m_ghostSprite, 10);
+                
+                // Add to object layer so it moves with the world
+                m_objectLayer->addChild(m_fields->m_ghostSprite);
             }
         }
         return true;
@@ -46,12 +49,13 @@ class $modify(GhostLayer, PlayLayer) {
     void update(float dt) {
         PlayLayer::update(dt);
 
-        if (!GhostIcon::get()->getRealEnabled() || m_isPaused) return;
+        auto mod = GhostIcon::get();
+        if (!mod || !mod->getRealEnabled() || m_isPaused) return;
 
         // 1. Record current position
-        // On Android, recording every frame is heavy. 
-        // This is a basic version; we can optimize with 'ticks' later.
-        m_fields->m_currentRunData.push_back(m_player1->getPosition());
+        if (m_player1) {
+            m_fields->m_currentRunData.push_back(m_player1->getPosition());
+        }
 
         // 2. Playback previous run
         if (!m_fields->m_lastRunData.empty() && m_fields->m_frameIndex < m_fields->m_lastRunData.size()) {
@@ -68,7 +72,7 @@ class $modify(GhostLayer, PlayLayer) {
     void resetLevel() {
         PlayLayer::resetLevel();
 
-        // Swap data: Current run becomes the Ghost for the next run
+        // If we finished a run, save it as the ghost for the next attempt
         if (!m_fields->m_currentRunData.empty()) {
             m_fields->m_lastRunData = m_fields->m_currentRunData;
         }
