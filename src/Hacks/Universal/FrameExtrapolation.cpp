@@ -27,7 +27,6 @@ class $modify(ExtrapolatedGameLayer, GJBaseGameLayer) {
         float m_p1LastRot = 0.0f;
     };
 
-    // Fast math for Android
     inline float fastLerp(float a, float b, float t) {
         return a + t * (b - a);
     }
@@ -35,8 +34,10 @@ class $modify(ExtrapolatedGameLayer, GJBaseGameLayer) {
     virtual void update(float dt) {
         GJBaseGameLayer::update(dt);
 
-        // Fast exit for mobile performance
-        if (m_isPaused || dt <= 0 || dt > 0.1f) return;
+        // FIX: Cast to PlayLayer to check for m_isPaused
+        auto pl = typeinfo_cast<PlayLayer*>(this);
+        if (!pl || pl->m_isPaused || dt <= 0 || dt > 0.1f) return;
+        
         if (!FrameExtrapolation::get()->getRealEnabled()) return;
 
         auto f = m_fields.self();
@@ -51,23 +52,19 @@ class $modify(ExtrapolatedGameLayer, GJBaseGameLayer) {
             f->m_progressTilNextTick += dt;
         }
 
-        // MOBILE LIMITER: If TPS is under 40 or over 500, kill extrapolation to save battery/CPU
         if (f->m_timeTilNextTick < 0.002f || f->m_timeTilNextTick > 0.025f) return;
 
         float percent = f->m_progressTilNextTick / f->m_timeTilNextTick;
         if (percent > 1.0f) percent = 1.0f;
 
-        // Camera prediction
         float diffX = f->m_lastCamPos.x - f->m_lastCamPos2.x;
         float diffY = f->m_lastCamPos.y - f->m_lastCamPos2.y;
         
-        // Safety: Stops the "disappearing level" bug on Android
         if (std::abs(diffX) < 100.0f) {
             m_objectLayer->setPositionX(fastLerp(f->m_lastCamPos.x, f->m_lastCamPos.x + diffX, percent));
             m_objectLayer->setPositionY(fastLerp(f->m_lastCamPos.y, f->m_lastCamPos.y + diffY, percent));
         }
 
-        // Player prediction (Minimal logic for mobile)
         if (m_player1 && !m_player1->m_isDead) {
             CCPoint pPos = m_player1->getPosition();
             float pDiffX = pPos.x - f->m_p1LastPos.x;
