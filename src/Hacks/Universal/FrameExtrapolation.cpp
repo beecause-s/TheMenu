@@ -1,3 +1,4 @@
+
 #include "../../Client/Module.hpp"
 #include <Geode/modify/GJBaseGameLayer.hpp>
 #include <Geode/modify/PlayLayer.hpp>
@@ -10,7 +11,7 @@ public:
         setName("Frame Extrapolation");
         setID("frame-extrapolation");
         setCategory("Universal");
-        setDescription("Predicts frames to smooth movement. Patched for QOLMod 2.2.");
+        setDescription("Smooths between frames by predicting movement.");
         setDisabled(false);
         setDisabledMessage("Frame extrapolation is temporarily disabled due to bugs");
     }
@@ -66,23 +67,22 @@ class $modify(ExtrapolatedGameLayer, GJBaseGameLayer) {
         if (f->m_timeTilNextTick <= 0) return;
         float percent = f->m_progressTilNextTick / f->m_timeTilNextTick;
 
-        // 1. Camera Extrapolation
-        CCPoint camPos = m_objectLayer->getPosition();
+        // 1. Camera
         float camDiffX = f->m_lastCamPos.x - f->m_lastCamPos2.x;
         float camDiffY = f->m_lastCamPos.y - f->m_lastCamPos2.y;
         
         m_objectLayer->setPositionX(lerpVal(f->m_lastCamPos.x, f->m_lastCamPos.x + camDiffX, percent));
         m_objectLayer->setPositionY(lerpVal(f->m_lastCamPos.y, f->m_lastCamPos.y + camDiffY, percent));
 
-        // 2. Ground Extrapolation
+        // 2. Ground
         if (m_groundLayer) extrapolateGround(m_groundLayer, percent, camDiffX);
         if (m_groundLayer2) extrapolateGround(m_groundLayer2, percent, camDiffX);
 
-        // 3. Player Extrapolation
+        // 3. Players
         if (m_player1) extrapolatePlayer(m_player1, percent, f->m_p1LastPos, f->m_p1LastRot);
         if (m_player2) extrapolatePlayer(m_player2, percent, f->m_p2LastPos, f->m_p2LastRot);
 
-        // Save states for next frame
+        // Save states
         if (m_player1) {
             f->m_p1LastPos = m_player1->getPosition();
             f->m_p1LastRot = m_player1->getRotation();
@@ -107,15 +107,23 @@ class $modify(ExtrapolatedGameLayer, GJBaseGameLayer) {
             lerpVal(currentPos.y, currentPos.y + diffY, percent) 
         });
 
-        if (player->m_mainLayer) {
-            float currentRot = player->getRotation();
-            player->m_mainLayer->setRotation(currentRot + ((currentRot - lastRot) * percent));
+        // Fixed Rotation logic
+        float currentRot = player->getRotation();
+        float rotDiff = currentRot - lastRot;
+        
+        // Use the main visual node for rotation smoothing
+        if (auto visual = player->getChildByID("main-layer")) {
+            visual->setRotation(currentRot + (rotDiff * percent));
+        } else {
+            player->setRotation(currentRot + (rotDiff * percent));
         }
     }
 
     void extrapolateGround(GJGroundLayer* ground, float percent, float moveDelta) {
-        if (!ground) return;
-        for (auto child : CCArrayExt<CCNode*>(ground->getChildren())) {
+        if (!ground || !ground->getChildren()) return;
+        auto children = ground->getChildren();
+        for (int i = 0; i < children->count(); ++i) {
+            auto child = static_cast<CCNode*>(children->objectAtIndex(i));
             if (typeinfo_cast<CCSpriteBatchNode*>(child)) {
                 child->setPositionX(lerpVal(0.0f, moveDelta, percent));
             }
